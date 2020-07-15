@@ -1,0 +1,7 @@
+[Unit]
+Description=MinIO Webhook
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/minio-webhook /var/log/minio-webhook.log
+Restart=always
