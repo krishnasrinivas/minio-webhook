@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"sync"
+	"path/filepath"
 	"syscall"
 )
 
@@ -16,35 +16,33 @@ var port = os.Getenv("MINIO_WEBHOOK_PORT")
 
 func main() {
 	if len(os.Args) != 2 {
-		fmt.Println("Usage: minio-webhook filename.log")
+		fmt.Println("Usage: minio-webhook log-dir")
 		os.Exit(1)
 	}
 	if port == "" {
 		port = "8080"
 	}
-	logFilePath := os.Args[1]
-	logFile, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0640)
-	if err != nil {
-		log.Fatal(err)
+	logDir := os.Args[1]
+
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		log.Fatalf("os.MkdirAll() %s\n", err)
 	}
-	var logFileMu sync.Mutex
+
+	pathFormat := filepath.Join(logDir, "2006-01-02.log")
+	if err := openLogFile(pathFormat, onLogClose); err != nil {
+		log.Fatalf("openLogFile failed with '%s'\n", err)
+	}
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGHUP)
 
 	go func() {
-		for _ = range sigs {
-			logFileMu.Lock()
-			logFile.Close()
-			logFile, err = os.OpenFile(logFilePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0640)
-			if err != nil {
-				log.Fatal(err)
-			}
-			logFileMu.Unlock()
+		for range sigs {
+			closeLogFile()
 		}
 	}()
 
-	err = http.ListenAndServe(":"+port, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	err := http.ListenAndServe(":"+port, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if authToken != "" {
 			if authToken != r.Header.Get("Authorization") {
 				return
@@ -56,10 +54,8 @@ func main() {
 			if err != nil {
 				return
 			}
-			logFileMu.Lock()
-			logFile.Write(data)
-			logFile.WriteString("\n")
-			logFileMu.Unlock()
+			fmt.Println(string(data))
+			writeToLog(data)
 		default:
 		}
 	}))
